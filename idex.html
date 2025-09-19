@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PEMA TEAM – Smenný kalendár</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {font-family: Arial, sans-serif; margin:0; background:#0b0f14; color:#eaf1ff;}
+    header {background:#121824; padding:20px; text-align:center;}
+    header h1 {margin:0; font-size:28px; color:#8ab4ff;}
+    header p {margin:4px 0; color:#7d8aa5;}
+
+    .legend {display:flex; justify-content:center; flex-wrap:wrap; gap:10px; margin:15px 0;}
+    .legend span {padding:6px 12px; border-radius:6px; font-size:14px; font-weight:bold; color:#0b0f14;}
+    .lg-24h {background:#00ff00;}
+    .lg-12r {background:#00ffff;}
+    .lg-12n {background:#0066ff; color:#fff;}
+    .lg-volno {background:#66ccff;}
+    .lg-neodr {background:#ff3333; color:#fff;}
+    .lg-pn {background:#cc00ff; color:#fff;}
+    .lg-sviatok {background:#ffcc00; color:#000;}
+
+    .nav {display:flex; justify-content:space-between; align-items:center; margin:20px;}
+    .nav button {background:#8ab4ff; border:none; color:#0b0f14; font-size:18px; padding:8px 14px; border-radius:6px; cursor:pointer; font-weight:bold;}
+    .nav h2 {margin:0; font-size:20px; text-transform:capitalize;}
+
+    table {width:95%; margin:0 auto 20px auto; border-collapse:collapse; background:#121824; border-radius:8px; overflow:hidden;}
+    th, td {border:1px solid #2a3850; padding:8px; text-align:center;}
+    th {background:#1d2636;}
+    select {padding:4px; border-radius:4px; border:none; font-size:14px;}
+
+    .actions {text-align:center; margin:20px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;}
+    .actions button {background:#33d17a; border:none; color:#0b0f14; font-weight:bold; padding:10px 16px; border-radius:6px; cursor:pointer;}
+    .actions button:hover {opacity:0.85;}
+
+    canvas {max-width:600px; margin:0 auto 30px auto; display:block; background:#121824; padding:20px; border-radius:10px;}
+
+    .holiday {border:2px solid #ffcc00;}
+    .strikethrough {text-decoration: line-through; color:#ff3333;}
+
+    .row-24H {background:#00ff00 !important; color:#000;}
+    .row-12H-R {background:#00ffff !important; color:#000;}
+    .row-12H-N {background:#0066ff !important; color:#fff;}
+    .row-Voľno {background:#66ccff !important; color:#000;}
+    .row-Neodrobené {background:#ff3333 !important; color:#fff;}
+    .row-PN {background:#cc00ff !important; color:#fff;}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PEMA TEAM</h1>
+    <p>Roman Kereš</p>
+    <p>Služby MB – Panónska</p>
+  </header>
+
+  <div class="legend">
+    <span class="lg-24h">24H</span>
+    <span class="lg-12r">12H-R</span>
+    <span class="lg-12n">12H-N</span>
+    <span class="lg-volno">Voľno</span>
+    <span class="lg-neodr">Neodrobené</span>
+    <span class="lg-pn">PN</span>
+    <span class="lg-sviatok">Sviatok</span>
+  </div>
+
+  <div class="nav">
+    <button onclick="prevMonth()">◀</button>
+    <h2 id="monthYear"></h2>
+    <button onclick="nextMonth()">▶</button>
+  </div>
+
+  <div id="table-container"></div>
+
+  <div id="summary" style="text-align:center; margin:20px; font-size:18px; font-weight:bold;"></div>
+
+  <canvas id="chart"></canvas>
+
+  <div class="actions">
+    <button onclick="exportPDF()">📄 Export do PDF</button>
+    <button onclick="exportImage()">🖼️ Export do JPG</button>
+    <button onclick="share()">📤 Zdieľať</button>
+    <button onclick="window.print()">🖨️ Tlačiť mesačný sumár</button>
+  </div>
+
+<script>
+const services = ["", "24H", "12H-R", "12H-N", "Voľno", "Neodrobené", "PN"];
+const hourlyRate = 6.20;
+
+const holidays = {
+  "1-1":"Deň vzniku SR",
+  "1-6":"Zjavenie Pána",
+  "5-1":"Sviatok práce",
+  "5-8":"Deň víťazstva",
+  "7-5":"Cyril a Metod",
+  "8-29":"Výročie SNP",
+  "9-1":"Deň Ústavy SR",
+  "9-15":"Sedembolestná",
+  "11-1":"Sviatok všetkých svätých",
+  "11-17":"Deň boja za slobodu",
+  "12-24":"Štedrý deň",
+  "12-25":"Prvý sviatok vianočný",
+  "12-26":"Druhý sviatok vianočný"
+};
+
+// aktuálny mesiac a rok
+let today = new Date();
+let currentYear = today.getFullYear();
+let currentMonth = today.getMonth();
+
+function renderTable(year,month){
+  const container=document.getElementById("table-container");
+  container.innerHTML="";
+  document.getElementById("monthYear").textContent=new Date(year,month).toLocaleString("sk-SK",{month:"long",year:"numeric"});
+
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  let table=`<table><thead><tr><th>Dátum</th><th>Deň</th><th>Služba</th><th>Zárobok</th></tr></thead><tbody>`;
+
+  for(let d=1;d<=daysInMonth;d++){
+    const date=`${year}-${month+1}-${d}`;
+    const weekday=new Date(year,month,d).toLocaleDateString("sk-SK",{weekday:"short"});
+    let saved=localStorage.getItem(date)||"";
+    let isHoliday = holidays[`${month+1}-${d}`] ? "holiday" : "";
+    let earning = calcEarning(saved);
+    let earningDisplay = "";
+    if(saved==="Neodrobené"){earningDisplay=`<span class='strikethrough'>0 €</span>`;}
+    else if(saved==="Voľno"||saved===""||saved==="PN"){earningDisplay=``;}
+    else {earningDisplay=earning.toFixed(2)+ " €";}
+    table+=`<tr class="${isHoliday} row-${saved}">
+      <td>${d}.${month+1}.${year}</td>
+      <td>${weekday}</td>
+      <td><select onchange="saveService('${date}',this.value)">`+
+      services.map(s=>`<option value="${s}" ${s===saved?"selected":""}>${s}</option>`).join("")+
+      `</select></td>
+      <td id="earn-${date}">${earningDisplay}</td>
+    </tr>`;
+  }
+  table+=`</tbody></table>`;
+  container.innerHTML=table;
+  updateChartAndSummary(year,month);
+}
+
+function calcEarning(service){
+  if(service==="24H") return 24*hourlyRate;
+  if(service==="12H-R") return 12*hourlyRate;
+  if(service==="12H-N") return 12*hourlyRate;
+  return 0;
+}
+
+function saveService(date,val){
+  localStorage.setItem(date,val);
+  renderTable(currentYear,currentMonth);
+}
+
+function updateChartAndSummary(year,month){
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  let counts={"24H":0,"12H-R":0,"12H-N":0,"Voľno":0,"Neodrobené":0,"PN":0};
+  let totalHours=0, totalEur=0;
+
+  for(let d=1;d<=daysInMonth;d++){
+    let val=localStorage.getItem(`${year}-${month+1}-${d}`);
+    if(val==="24H"){counts["24H"]++; totalHours+=24; totalEur+=24*hourlyRate;}
+    if(val==="12H-R"){counts["12H-R"]++; totalHours+=12; totalEur+=12*hourlyRate;}
+    if(val==="12H-N"){counts["12H-N"]++; totalHours+=12; totalEur+=12*hourlyRate;}
+    if(val==="Voľno"){counts["Voľno"]++;}
+    if(val==="Neodrobené"){counts["Neodrobené"]++;}
+    if(val==="PN"){counts["PN"]++;}
+  }
+
+  document.getElementById("summary").textContent = 
+    `Odrobené hodiny: ${totalHours}h | Zárobok: ${totalEur.toFixed(2)} €`;
+
+  const ctx=document.getElementById("chart").getContext("2d");
+  if(window.barChart) window.barChart.destroy();
+  window.barChart=new Chart(ctx,{
+    type:"bar",
+    data:{labels:Object.keys(counts),datasets:[{label:"Počet služieb",data:Object.values(counts),backgroundColor:["#00ff00","#00ffff","#0066ff","#66ccff","#ff3333","#cc00ff"]}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}
+  });
+}
+
+function prevMonth(){
+  if(currentYear===2025 && currentMonth===0) return;
+  if(currentMonth===0){currentMonth=11; currentYear--;} else {currentMonth--;}
+  renderTable(currentYear,currentMonth);
+}
+function nextMonth(){
+  if(currentYear===2026 && currentMonth===11) return;
+  if(currentMonth===11){currentMonth=0; currentYear++;} else {currentMonth++;}
+  renderTable(currentYear,currentMonth);
+}
+
+async function exportPDF(){
+  const { jsPDF } = window.jspdf;
+  const doc=new jsPDF("p","pt","a4");
+  await html2canvas(document.body).then(canvas=>{
+    const imgData=canvas.toDataURL("image/png");
+    doc.addImage(imgData,"PNG",20,20,555,770);
+    doc.save("pema-team.pdf");
+  });
+}
+
+function exportImage(){
+  html2canvas(document.body).then(canvas=>{
+    const link=document.createElement("a");
+    link.download="pema-team.jpg";
+    link.href=canvas.toDataURL("image/jpeg");
+    link.click();
+  });
+}
+
+function share(){
+  html2canvas(document.body).then(canvas=>{
+    canvas.toBlob(blob=>{
+      const file=new File([blob],"pema-team.jpg",{type:"image/jpeg"});
+      if(navigator.share){
+        navigator.share({files:[file],title:"PEMA TEAM",text:"Môj smenný kalendár"});
+      } else {
+        alert("Zdieľanie nie je podporované v tomto prehliadači.");
+      }
+    });
+  });
+}
+
+renderTable(currentYear,currentMonth);
+</script>
+</body>
+</html>
